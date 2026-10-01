@@ -1,0 +1,21 @@
+{
+  "name": "printago-example-order-intake-webhook",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Receive orders from any storefront or ERP, create them in Printago and send them to print.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "send-test-order": "tsx src/send-test-order.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  },
+  "license": "MIT"
+}

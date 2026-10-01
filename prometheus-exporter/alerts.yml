@@ -1,0 +1,41 @@
+groups:
+  - name: printago
+    rules:
+      - alert: PrinterOffline
+        expr: printago_printer_online == 0 and printago_printer_enabled == 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.printer }} has been offline for 10 minutes"
+
+      - alert: PrintFailed
+        expr: printago_printer_state{state="FAILED"} == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: "A print failed on {{ $labels.printer }}"
+
+      - alert: PrinterError
+        expr: printago_printer_errors > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.printer }} is reporting an error"
+
+      - alert: BedWaitingToBeCleared
+        expr: printago_printer_state{state="FINISH"} == 1
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $labels.printer }} finished 30 minutes ago and is waiting for its bed to be cleared"
+
+      - alert: PrintagoExporterDisconnected
+        expr: printago_mqtt_connected == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The Printago exporter has lost its MQTT connection"

@@ -1,0 +1,21 @@
+{
+  "name": "printago-example-live-printer-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A live wall-display dashboard for every printer in your Printago farm, fed by MQTT.",
+  "type": "module",
+  "engines": { "node": ">=20.12" },
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  },
+  "license": "MIT"
+}

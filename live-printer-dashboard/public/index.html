@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Print Farm · Live</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --panel: #161b22;
+        --line: #262d36;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --blue: #4c8dff;
+        --green: #3fb950;
+        --amber: #d29922;
+        --red: #f85149;
+        --gray: #6e7681;
+        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); }
+      header {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px;
+        padding: 20px 28px; border-bottom: 1px solid var(--line);
+        position: sticky; top: 0; background: rgba(13, 17, 23, 0.92); backdrop-filter: blur(6px); z-index: 1;
+      }
+      h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: 0.2px; }
+      .live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+      .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--gray); }
+      .live.on i { background: var(--green); box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.2); }
+      .summary { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+      .chip { font-size: 13px; padding: 4px 10px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); }
+      .chip b { color: var(--text); font-weight: 600; margin-right: 4px; }
+      main {
+        display: grid; gap: 16px; padding: 24px 28px;
+        grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      }
+      .card {
+        background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+        padding: 16px; display: flex; flex-direction: column; gap: 12px; min-height: 190px;
+        border-top: 3px solid var(--tone, var(--gray));
+      }
+      .card.offline { opacity: 0.55; }
+      .top { display: flex; justify-content: space-between; align-items: start; gap: 8px; }
+      .name { font-weight: 600; font-size: 15px; }
+      .model { color: var(--muted); font-size: 12px; margin-top: 2px; }
+      .pill {
+        font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+        padding: 3px 8px; border-radius: 6px; color: var(--tone); white-space: nowrap;
+        background: color-mix(in srgb, var(--tone) 16%, transparent);
+      }
+      .job { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .job b { color: var(--text); font-weight: 500; }
+      .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+      .bar div { height: 100%; background: var(--tone); transition: width 0.6s ease; }
+      .meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .temps { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .temps span { white-space: nowrap; }
+      .temps b { color: var(--text); font-weight: 500; }
+      .spools { display: flex; gap: 6px; margin-top: auto; }
+      .spool { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); position: relative; }
+      .spool.empty { background: transparent !important; border-style: dashed; }
+      .alert { font-size: 12px; padding: 6px 8px; border-radius: 6px; background: rgba(248, 81, 73, 0.12); color: #ffa198; }
+      .alert.warn { background: rgba(210, 153, 34, 0.12); color: #e3b341; }
+      .empty-state { color: var(--muted); padding: 60px 28px; text-align: center; grid-column: 1 / -1; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Print Farm</h1>
+      <span class="live" id="live"><i></i><span>Connecting…</span></span>
+      <div class="summary" id="summary"></div>
+    </header>
+    <main id="grid"><div class="empty-state">Waiting for printers…</div></main>
+
+    <template id="card">
+      <article class="card">
+        <div class="top">
+          <div><div class="name"></div><div class="model"></div></div>
+          <span class="pill"></span>
+        </div>
+        <div class="job"></div>
+        <div class="bar"><div></div></div>
+        <div class="meta"><span class="progress"></span><span class="eta"></span></div>
+        <div class="temps"></div>
+        <div class="alerts"></div>
+        <div class="spools"></div>
+      </article>
+    </template>
+
+    <script>
+      const printers = new Map(); // id -> { name, modelName, enabled }
+      const stats = new Map(); // id -> slim stat from the server
+      const grid = document.getElementById('grid');
+      const cardTemplate = document.getElementById('card');
+
+      // Printer `state` is the raw state the printer reports. Collapse it into
+      // the handful of statuses a person scanning a wall of printers cares about.
+      function statusOf(stat, printer) {
+        if (printer && !printer.enabled) return { label: 'Disabled', tone: 'var(--gray)' };
+        // A stat past expiresAt is stale: the printer stopped reporting.
+        const stale = stat && Date.parse(stat.expiresAt) < Date.now();
+        if (!stat || !stat.isOnline || stale) return { label: 'Offline', tone: 'var(--gray)' };
+        if (stat.errors.length) return { label: 'Error', tone: 'var(--red)' };
+        switch ((stat.state || '').toUpperCase()) {
+          case 'RUNNING': return { label: 'Printing', tone: 'var(--blue)' };
+          case 'PREPARE':
+          case 'SLICING': return { label: 'Preparing', tone: 'var(--blue)' };
+          case 'PAUSE': return { label: 'Paused', tone: 'var(--amber)' };
+          case 'FINISH': return { label: 'Finished', tone: 'var(--green)' };
+          case 'FAILED': return { label: 'Failed', tone: 'var(--red)' };
+          default: return { label: 'Idle', tone: 'var(--green)' };
+        }
+      }
+
+      function duration(minutes) {
+        if (minutes == null || minutes <= 0) return '';
+        const h = Math.floor(minutes / 60);
+        const m = Math.round(minutes % 60);
+        const done = new Date(Date.now() + minutes * 60_000);
+        const at = done.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        return `${h ? `${h}h ` : ''}${m}m left · ${at}`;
+      }
+
+      const TEMP_LABELS = { nozzle_0: 'Nozzle', nozzle_1: 'Nozzle 2', bed_0: 'Bed', chamber_0: 'Chamber' };
+
+      function render() {
+        const ids = [...new Set([...printers.keys(), ...stats.keys()])];
+        if (!ids.length) return;
+        ids.sort((a, b) => (printers.get(a)?.name ?? a).localeCompare(printers.get(b)?.name ?? b, undefined, { numeric: true }));
+
+        const counts = {};
+        grid.replaceChildren(
+          ...ids.map((id) => {
+            const printer = printers.get(id);
+            const stat = stats.get(id);
+            const status = statusOf(stat, printer);
+            counts[status.label] = (counts[status.label] ?? 0) + 1;
+
+            const card = cardTemplate.content.firstElementChild.cloneNode(true);
+            card.style.setProperty('--tone', status.tone);
+            card.classList.toggle('offline', status.label === 'Offline' || status.label === 'Disabled');
+            card.querySelector('.name').textContent = printer?.name ?? id;
+            card.querySelector('.model').textContent = printer?.modelName ?? '';
+            card.querySelector('.pill').textContent = status.label;
+
+            const print = stat?.print ?? {};
+            const active = ['Printing', 'Preparing', 'Paused'].includes(status.label);
+            const percent = active ? Math.max(0, Math.min(100, print.percent ?? 0)) : status.label === 'Finished' ? 100 : 0;
+            const job = card.querySelector('.job');
+            if (print.taskName && (active || status.label === 'Finished')) {
+              job.append('Job ');
+              job.appendChild(document.createElement('b')).textContent = print.taskName;
+            } else {
+              job.textContent = status.label === 'Finished' ? 'Ready to clear the bed' : ' ';
+            }
+            card.querySelector('.bar div').style.width = `${percent}%`;
+            card.querySelector('.progress').textContent = active
+              ? `${percent}%${print.totalLayers ? ` · layer ${print.currentLayer ?? 0}/${print.totalLayers}` : ''}`
+              : '';
+            card.querySelector('.eta').textContent = active ? duration(print.timeRemaining) : '';
+
+            const temps = card.querySelector('.temps');
+            for (const [ref, t] of Object.entries(stat?.temperatures ?? {})) {
+              if (t.current == null || !TEMP_LABELS[ref]) continue;
+              const span = document.createElement('span');
+              span.append(`${TEMP_LABELS[ref]} `);
+              span.appendChild(document.createElement('b')).textContent = `${Math.round(t.current)}°`;
+              if (t.target) span.append(` / ${Math.round(t.target)}°`);
+              temps.appendChild(span);
+            }
+
+            const alerts = card.querySelector('.alerts');
+            for (const e of stat?.errors ?? []) {
+              const div = alerts.appendChild(document.createElement('div'));
+              div.className = 'alert';
+              div.textContent = e.message || e.code;
+            }
+            for (const w of (stat?.warnings ?? []).slice(0, 1)) {
+              const div = alerts.appendChild(document.createElement('div'));
+              div.className = 'alert warn';
+              div.textContent = w.message || w.code;
+            }
+
+            const spools = card.querySelector('.spools');
+            const slots = [
+              ...(stat?.filament?.ams?.ams ?? []).flatMap((unit) => unit.slots ?? []),
+              ...(stat?.filament?.spools ?? []),
+            ];
+            for (const slot of slots) {
+              const dot = spools.appendChild(document.createElement('span'));
+              dot.className = 'spool';
+              if (slot.loaded === false || !slot.color) dot.classList.add('empty');
+              else dot.style.background = `#${String(slot.color).replace('#', '').slice(0, 6)}`;
+              dot.title = [slot.type, slot.color && `#${slot.color}`].filter(Boolean).join(' ');
+            }
+            return card;
+          }),
+        );
+
+        const summary = document.getElementById('summary');
+        summary.replaceChildren(
+          ...['Printing', 'Preparing', 'Paused', 'Finished', 'Idle', 'Error', 'Failed', 'Offline', 'Disabled']
+            .filter((label) => counts[label])
+            .map((label) => {
+              const chip = document.createElement('span');
+              chip.className = 'chip';
+              chip.appendChild(document.createElement('b')).textContent = counts[label];
+              chip.append(label);
+              return chip;
+            }),
+        );
+      }
+
+      // Many stat messages can arrive per second across a farm: render at most once per frame.
+      let queued = false;
+      function scheduleRender() {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => {
+          queued = false;
+          render();
+        });
+      }
+
+      const live = document.getElementById('live');
+      const events = new EventSource('/events');
+      events.onopen = () => {
+        live.classList.add('on');
+        live.lastChild.textContent = 'Live';
+      };
+      events.onerror = () => {
+        live.classList.remove('on');
+        live.lastChild.textContent = 'Reconnecting…';
+      };
+      events.addEventListener('printers', (e) => {
+        printers.clear();
+        for (const p of JSON.parse(e.data)) printers.set(p.id, p);
+        scheduleRender();
+      });
+      events.addEventListener('stat', (e) => {
+        const stat = JSON.parse(e.data);
+        stats.set(stat.printerId, stat);
+        scheduleRender();
+      });
+      events.addEventListener('remove', (e) => {
+        stats.delete(JSON.parse(e.data).printerId);
+        scheduleRender();
+      });
+      // Keep the "done at" clock times fresh.
+      setInterval(scheduleRender, 30_000);
+    </script>
+  </body>
+</html>

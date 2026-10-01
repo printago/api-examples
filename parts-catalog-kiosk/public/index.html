@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Print Catalog</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --card: #ffffff;
+        --line: #e3e6eb;
+        --text: #1c2330;
+        --muted: #697386;
+        --accent: #2f6fed;
+        --accent-dark: #1f56c4;
+        --ok: #1a7f37;
+        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); }
+      header { padding: 28px 32px 8px; max-width: 1280px; margin: 0 auto; }
+      h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -0.3px; }
+      .sub { color: var(--muted); margin: 0 0 20px; }
+      .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+      input[type='search'] {
+        flex: 1 1 280px; font: inherit; font-size: 16px; padding: 12px 16px;
+        border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+      }
+      .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+      .chip {
+        font: inherit; font-size: 14px; padding: 8px 14px; border-radius: 999px; cursor: pointer;
+        border: 1px solid var(--line); background: var(--card); color: var(--muted);
+      }
+      .chip[aria-pressed='true'] { background: var(--text); border-color: var(--text); color: #fff; }
+      main {
+        display: grid; gap: 20px; padding: 20px 32px 48px; max-width: 1280px; margin: 0 auto;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      }
+      .card {
+        background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+        display: flex; flex-direction: column; cursor: pointer; text-align: left; font: inherit; color: inherit; padding: 0;
+        transition: transform 0.12s ease, box-shadow 0.12s ease;
+      }
+      .card:hover, .card:focus-visible { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(28, 35, 48, 0.08); }
+      .thumb {
+        aspect-ratio: 1; background: linear-gradient(135deg, #eef1f5, #e2e7ee); display: grid; place-items: center;
+        color: #a3acba; font-size: 13px;
+      }
+      .thumb { overflow: hidden; }
+      .thumb img { width: 100%; height: 100%; min-height: 0; object-fit: contain; padding: 12px; }
+      .info { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 4px; }
+      .name { font-weight: 600; font-size: 15px; }
+      .type { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--muted); }
+      .empty { color: var(--muted); grid-column: 1 / -1; text-align: center; padding: 60px; }
+
+      dialog {
+        border: none; border-radius: 18px; padding: 0; width: min(440px, calc(100vw - 32px));
+        box-shadow: 0 24px 64px rgba(28, 35, 48, 0.25);
+      }
+      dialog::backdrop { background: rgba(20, 26, 36, 0.45); }
+      .sheet { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+      .sheet .thumb { border-radius: 12px; aspect-ratio: auto; height: 220px; flex: none; }
+      .sheet .thumb img { height: 220px; }
+      .sheet h2 { margin: 0; font-size: 20px; }
+      .sheet p { margin: 0; color: var(--muted); }
+      label { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
+      label input { font: inherit; font-size: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+      .stepper { display: flex; align-items: center; gap: 12px; }
+      .stepper button {
+        width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--card);
+        font-size: 22px; cursor: pointer;
+      }
+      .stepper output { font-size: 20px; font-weight: 600; min-width: 32px; text-align: center; }
+      .actions { display: flex; gap: 10px; justify-content: flex-end; }
+      .btn { font: inherit; font-weight: 600; padding: 12px 20px; border-radius: 10px; border: none; cursor: pointer; }
+      .btn.primary { background: var(--accent); color: #fff; }
+      .btn.primary:hover { background: var(--accent-dark); }
+      .btn.primary:disabled { opacity: 0.6; cursor: default; }
+      .btn.ghost { background: transparent; color: var(--muted); }
+      .error { color: #c62828; font-size: 14px; }
+      .done { text-align: center; padding: 8px 0; }
+      .done .check { font-size: 44px; color: var(--ok); }
+      .progress { font-size: 14px; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Print Catalog</h1>
+      <p class="sub">Pick something, choose how many, and it goes straight into the print queue.</p>
+      <div class="controls">
+        <input type="search" id="search" placeholder="Search parts…" autocomplete="off" />
+        <div class="chips" id="folders"></div>
+      </div>
+    </header>
+    <main id="grid"><div class="empty">Loading the catalog…</div></main>
+
+    <dialog id="dialog"><div class="sheet" id="sheet"></div></dialog>
+
+    <script>
+      let items = [];
+      let config = { pinRequired: false, maxQuantity: 10 };
+      let folder = null;
+      const grid = document.getElementById('grid');
+      const search = document.getElementById('search');
+      const dialog = document.getElementById('dialog');
+      const sheet = document.getElementById('sheet');
+
+      async function load() {
+        const response = await fetch('/api/catalog');
+        const data = await response.json();
+        if (!response.ok) {
+          grid.innerHTML = '';
+          grid.appendChild(el('div', 'empty', data.error || 'Could not load the catalog.'));
+          return;
+        }
+        items = data.items;
+        config = data;
+        renderFolders(data.folders);
+        render();
+      }
+
+      function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null) node.textContent = text;
+        return node;
+      }
+
+      function thumb(item) {
+        const box = el('div', 'thumb');
+        if (item.thumbnail) {
+          const img = el('img');
+          img.src = item.thumbnail;
+          img.alt = '';
+          img.loading = 'lazy';
+          img.onerror = () => img.replaceWith(document.createTextNode('No preview'));
+          box.appendChild(img);
+        } else {
+          box.textContent = 'No preview';
+        }
+        return box;
+      }
+
+      function renderFolders(folders) {
+        const bar = document.getElementById('folders');
+        if (!folders.length) return;
+        const chip = (name, value) => {
+          const b = el('button', 'chip', name);
+          b.setAttribute('aria-pressed', String(folder === value));
+          b.onclick = () => {
+            folder = value;
+            renderFolders(folders);
+            render();
+          };
+          return b;
+        };
+        bar.replaceChildren(chip('All', null), ...folders.map((f) => chip(f, f)));
+      }
+
+      function render() {
+        const q = search.value.trim().toLowerCase();
+        const shown = items.filter(
+          (i) =>
+            (!folder || i.folder === folder) &&
+            (!q || i.name.toLowerCase().includes(q) || (i.description || '').toLowerCase().includes(q)),
+        );
+        if (!shown.length) {
+          grid.replaceChildren(el('div', 'empty', items.length ? 'Nothing matches that search.' : 'No parts to show yet.'));
+          return;
+        }
+        grid.replaceChildren(
+          ...shown.map((item) => {
+            const card = el('button', 'card');
+            card.appendChild(thumb(item));
+            const info = card.appendChild(el('div', 'info'));
+            info.appendChild(el('span', 'type', item.type));
+            info.appendChild(el('span', 'name', item.name));
+            card.onclick = () => open(item);
+            return card;
+          }),
+        );
+      }
+
+      function open(item) {
+        let quantity = 1;
+        sheet.replaceChildren();
+        sheet.appendChild(thumb(item));
+        sheet.appendChild(el('h2', null, item.name));
+        if (item.description) sheet.appendChild(el('p', null, item.description));
+
+        const stepper = el('div', 'stepper');
+        const minus = el('button', null, '−');
+        const count = el('output', null, '1');
+        const plus = el('button', null, '+');
+        const update = (d) => {
+          quantity = Math.max(1, Math.min(config.maxQuantity, quantity + d));
+          count.textContent = quantity;
+        };
+        minus.onclick = () => update(-1);
+        plus.onclick = () => update(1);
+        stepper.append(minus, count, plus);
+        const qtyLabel = el('label', null, 'How many');
+        qtyLabel.appendChild(stepper);
+        sheet.appendChild(qtyLabel);
+
+        const nameLabel = el('label', null, 'Your name (shown in the queue)');
+        const nameInput = nameLabel.appendChild(el('input'));
+        nameInput.maxLength = 40;
+        sheet.appendChild(nameLabel);
+
+        let pinInput = null;
+        if (config.pinRequired) {
+          const pinLabel = el('label', null, 'Kiosk PIN');
+          pinInput = pinLabel.appendChild(el('input'));
+          pinInput.type = 'password';
+          pinInput.inputMode = 'numeric';
+          sheet.appendChild(pinLabel);
+        }
+
+        const error = sheet.appendChild(el('div', 'error'));
+        const actions = sheet.appendChild(el('div', 'actions'));
+        const cancel = actions.appendChild(el('button', 'btn ghost', 'Cancel'));
+        const go = actions.appendChild(el('button', 'btn primary', 'Print'));
+        cancel.onclick = () => dialog.close();
+        go.onclick = async () => {
+          go.disabled = true;
+          error.textContent = '';
+          const response = await fetch('/api/print', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-kiosk-pin': pinInput?.value ?? '' },
+            body: JSON.stringify({ partId: item.id, quantity, requester: nameInput.value }),
+          }).catch(() => null);
+          const data = response ? await response.json() : { error: 'Could not reach the kiosk server.' };
+          if (!response?.ok) {
+            error.textContent = data.error;
+            go.disabled = false;
+            return;
+          }
+          confirmation(item, data);
+        };
+        dialog.showModal();
+      }
+
+      function confirmation(item, { buildId, quantity }) {
+        sheet.replaceChildren();
+        const done = sheet.appendChild(el('div', 'done'));
+        done.appendChild(el('div', 'check', '✓'));
+        done.appendChild(el('h2', null, `${quantity} × ${item.name} queued`));
+        const progress = done.appendChild(el('p', 'progress', 'Adding it to the queue…'));
+        const actions = sheet.appendChild(el('div', 'actions'));
+        const close = actions.appendChild(el('button', 'btn primary', 'Done'));
+        close.onclick = () => dialog.close();
+
+        // Follow the jobs for a minute so people can see it land.
+        let polls = 0;
+        const timer = setInterval(async () => {
+          if (!dialog.open || ++polls > 6) return clearInterval(timer);
+          const r = await fetch(`/api/builds/${buildId}`).catch(() => null);
+          if (!r?.ok) return;
+          const { total, counts } = await r.json();
+          if (!total) return;
+          const printing = (counts.printing ?? 0) + (counts['sending-to-printer'] ?? 0);
+          const waiting = counts.pending ?? 0;
+          progress.textContent = [
+            `${total} job${total === 1 ? '' : 's'} in the queue`,
+            printing && `${printing} printing`,
+            waiting && `${waiting} waiting for a printer`,
+          ]
+            .filter(Boolean)
+            .join(' · ');
+        }, 10_000);
+      }
+
+      search.addEventListener('input', render);
+      load();
+    </script>
+  </body>
+</html>

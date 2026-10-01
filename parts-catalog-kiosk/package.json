@@ -1,0 +1,20 @@
+{
+  "name": "printago-example-parts-catalog-kiosk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A touch-friendly catalog of your Printago parts with a Print button, for makerspaces, classrooms and shop floors.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  },
+  "license": "MIT"
+}
